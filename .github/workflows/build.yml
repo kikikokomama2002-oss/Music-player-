@@ -44,11 +44,13 @@ jobs:
           set -euo pipefail
 
           if [ ! -d android ]; then
-            echo "::error::android/ directory is missing from this checkout."
-            echo "This means the android/ folder was never committed and pushed to this branch/tag on GitHub."
-            echo "Run locally: git add android/ && git commit -m 'Add android platform files' && git push"
-            echo "Then re-run this workflow."
-            exit 1
+            echo "::warning::android/ directory missing from checkout — regenerating Android platform files."
+
+            PROJECT_NAME=$(grep -m1 '^name:' pubspec.yaml | awk '{print $2}')
+
+            flutter create --platforms=android --project-name "$PROJECT_NAME" --org com.kikikokomama.musicplayer .
+
+            git status
           fi
 
           WRAPPER_SCRIPT="android/gradle/wrapper/bootstrap-wrapper.sh"
