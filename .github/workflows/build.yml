@@ -13,6 +13,18 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Diagnose repository contents
+        run: |
+          echo "== Repo root =="
+          ls -la
+          echo "== git ls-files (tracked files) matching android/ =="
+          git ls-files | grep '^android/' || echo "NO FILES under android/ are tracked by git"
+          echo "== Current branch/ref =="
+          git branch -a
+          git status
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -30,6 +42,15 @@ jobs:
       - name: Bootstrap Gradle wrapper
         run: |
           set -euo pipefail
+
+          if [ ! -d android ]; then
+            echo "::error::android/ directory is missing from this checkout."
+            echo "This means the android/ folder was never committed and pushed to this branch/tag on GitHub."
+            echo "Run locally: git add android/ && git commit -m 'Add android platform files' && git push"
+            echo "Then re-run this workflow."
+            exit 1
+          fi
+
           WRAPPER_SCRIPT="android/gradle/wrapper/bootstrap-wrapper.sh"
 
           if [ -f "$WRAPPER_SCRIPT" ]; then
@@ -37,11 +58,9 @@ jobs:
             chmod +x "$WRAPPER_SCRIPT"
             "./$WRAPPER_SCRIPT"
           else
-            echo "::warning::$WRAPPER_SCRIPT not found in checkout — it may not be committed to this branch/tag."
-            echo "Falling back to standard Gradle wrapper generation."
+            echo "::warning::$WRAPPER_SCRIPT not found — falling back to standard Gradle wrapper generation."
 
             if [ ! -f android/gradlew ]; then
-              echo "No gradlew found either; generating one with the system Gradle."
               (cd android && gradle wrapper --gradle-version 8.9)
             fi
 
