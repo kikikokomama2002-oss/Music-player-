@@ -28,7 +28,27 @@ jobs:
           cache: true
 
       - name: Bootstrap Gradle wrapper
-        run: chmod +x android/gradle/wrapper/bootstrap-wrapper.sh && ./android/gradle/wrapper/bootstrap-wrapper.sh
+        run: |
+          set -euo pipefail
+          WRAPPER_SCRIPT="android/gradle/wrapper/bootstrap-wrapper.sh"
+
+          if [ -f "$WRAPPER_SCRIPT" ]; then
+            echo "Found $WRAPPER_SCRIPT, running it."
+            chmod +x "$WRAPPER_SCRIPT"
+            "./$WRAPPER_SCRIPT"
+          else
+            echo "::warning::$WRAPPER_SCRIPT not found in checkout — it may not be committed to this branch/tag."
+            echo "Falling back to standard Gradle wrapper generation."
+
+            if [ ! -f android/gradlew ]; then
+              echo "No gradlew found either; generating one with the system Gradle."
+              (cd android && gradle wrapper --gradle-version 8.9)
+            fi
+
+            chmod +x android/gradlew
+          fi
+
+          test -x android/gradlew || { echo "::error::android/gradlew still missing/not executable after bootstrap."; exit 1; }
 
       - name: Flutter pub get
         run: flutter pub get
@@ -220,3 +240,4 @@ jobs:
       - name: Remove release signing material
         if: always() && startsWith(github.ref, 'refs/tags/v')
         run: rm -f android/release-key.jks android/key.properties
+
