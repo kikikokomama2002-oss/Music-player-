@@ -90,29 +90,20 @@ jobs:
           dart --version
           java -version
 
-      - name: Final Force-Pin Dependencies and Override Analyzer
+      - name: Final Force-Pin Dependencies
         shell: bash
         run: |
           set -euo pipefail
           cd "$PROJECT_DIR"
           
-          # 1. Remove conflicting dependencies
-          flutter pub remove build_runner isar_community_generator || true
+          # Remove old/conflicting dependencies
+          flutter pub remove build_runner isar_community_generator dart_style || true
           
-          # 2. Install the exact compatible working versions
-          flutter pub add dev:build_runner:2.4.11 dev:isar_community_generator:3.3.2
-          
-          # 3. Inject a strict dependency override to lock analyzer to 5.13.0
-          # This completely stops the pub solver from pulling analyzer 10.2.0
-          if ! grep -q "dependency_overrides:" pubspec.yaml; then
-            printf "\ndependency_overrides:\n  analyzer: 5.13.0\n" >> pubspec.yaml
-          else
-            # If override section exists, we insert the line right after it
-            sed -i '/dependency_overrides:/a \ \ analyzer: 5.13.0' pubspec.yaml
-          fi
+          # Install the exact compatible versions (build_runner >= 2.4.14 is REQUIRED)
+          flutter pub add dev:build_runner:2.4.15 dev:isar_community_generator:3.3.2
           
           echo "--- FINAL PUBSPEC CONFIGURATION ---"
-          grep -E "isar_community_generator:|build_runner:|analyzer:|dependency_overrides:" pubspec.yaml || true
+          grep -E "isar_community_generator:|build_runner:" pubspec.yaml || true
 
       - name: Prepare Android platform
         shell: bash
@@ -212,7 +203,7 @@ jobs:
           cd "$PROJECT_DIR"
 
           dart pub deps --style=compact | grep -E \
-            "build_runner|isar_community_generator|dart_style|analyzer" || true
+            "build_runner|isar_community_generator|dart_style" || true
 
       - name: Generate Isar code
         shell: bash
