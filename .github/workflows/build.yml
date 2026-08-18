@@ -90,17 +90,17 @@ jobs:
           dart --version
           java -version
 
-      - name: Fix Isar generator dependency (Foolproof version pin)
+      - name: Fix Isar generator dependency
         shell: bash
         run: |
           set -euo pipefail
           cd "$PROJECT_DIR"
           
-          # Remove previous versions (ignore errors if they don't exist)
+          # Remove old dependencies to allow a clean resolution
           flutter pub remove build_runner isar_community_generator || true
           
-          # Force the exact versions that work with Isar generator
-          flutter pub add dev:build_runner@2.4.13 dev:isar_community_generator@3.3.2
+          # Let pub solver automatically pick compatible versions based on your pubspec
+          flutter pub add dev:build_runner dev:isar_community_generator
           
           echo "Dependency configuration:"
           grep -E "isar_community_generator:|build_runner:" pubspec.yaml || true
