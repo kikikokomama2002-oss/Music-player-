@@ -17,7 +17,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -71,7 +70,7 @@ jobs:
             FOUND="$(find .ci-extracted -type f -name "pubspec.yaml" -print -quit || true)"
 
             if [ -z "$FOUND" ]; then
-              echo "::error::pubspec.yaml was not found inside ZIP."
+              echo "::error::No pubspec.yaml found inside ZIP."
               exit 1
             fi
 
@@ -80,12 +79,9 @@ jobs:
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-          echo "Flutter project:"
-          echo "$PROJECT_DIR"
-
           test -f "$PROJECT_DIR/pubspec.yaml"
 
-      - name: Diagnose Flutter environment
+      - name: Diagnose environment
         shell: bash
         run: |
           set -euo pipefail
@@ -94,8 +90,27 @@ jobs:
           dart --version
           java -version
 
-          echo "ANDROID_HOME=${ANDROID_HOME:-}"
-          echo "ANDROID_NDK_HOME=${ANDROID_NDK_HOME:-}"
+      - name: Fix Isar generator dependency
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd "$PROJECT_DIR"
+
+          if grep -q "isar_community_generator:" pubspec.yaml; then
+            sed -i -E \
+              's/(isar_community_generator:[[:space:]]*)\^?3\.3\.2/\13.3.1/' \
+              pubspec.yaml
+          fi
+
+          if grep -q "build_runner:" pubspec.yaml; then
+            sed -i -E \
+              's/(build_runner:[[:space:]]*)\^?2\.4\.9/\12.4.13/' \
+              pubspec.yaml
+          fi
+
+          echo "Dependency configuration:"
+          grep -E "isar_community_generator:|build_runner:" pubspec.yaml || true
 
       - name: Prepare Android platform
         shell: bash
@@ -107,15 +122,11 @@ jobs:
           PROJECT_NAME="$(awk '/^name:/ {print $2; exit}' pubspec.yaml)"
 
           if [ -z "$PROJECT_NAME" ]; then
-            echo "::error::Could not determine project name."
+            echo "::error::Could not determine Flutter project name."
             exit 1
           fi
 
-          echo "Project name: $PROJECT_NAME"
-
           if [ ! -d "android" ]; then
-            echo "android/ is missing. Generating Android platform."
-
             flutter create \
               --platforms=android \
               --project-name "$PROJECT_NAME" \
@@ -127,8 +138,6 @@ jobs:
              [ ! -f "android/gradle/wrapper/gradle-wrapper.jar" ] || \
              [ ! -f "android/gradle/wrapper/gradle-wrapper.properties" ]; then
 
-            echo "Gradle wrapper is incomplete. Regenerating."
-
             flutter create \
               --platforms=android \
               --project-name "$PROJECT_NAME" \
@@ -136,23 +145,51 @@ jobs:
               .
           fi
 
-          test -d android
+          chmod +x android/gradlew
+
           test -f android/gradlew
           test -f android/gradle/wrapper/gradle-wrapper.jar
           test -f android/gradle/wrapper/gradle-wrapper.properties
 
-          chmod +x android/gradlew
-
-          echo "Android platform ready."
-
-      - name: Fix build_runner dependency
+      - name: Configure Android NDK
         shell: bash
         run: |
           set -euo pipefail
 
           cd "$PROJECT_DIR"
 
-          dart pub add --dev build_runner:^2.15.1
+          NDK_VERSION="28.2.13676358"
+
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$ANDROID_HOME/cmdline-tools/bin/sdkmanager"
+          fi
+
+          if [ -x "$SDKMANAGER" ]; then
+            yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+            "$SDKMANAGER" "ndk;$NDK_VERSION"
+          fi
+
+          if [ -f android/app/build.gradle.kts ]; then
+            if grep -q "ndkVersion" android/app/build.gradle.kts; then
+              sed -i -E \
+                's/ndkVersion[[:space:]]*=[[:space:]]*[^[:space:]]+/ndkVersion = "28.2.13676358"/' \
+                android/app/build.gradle.kts
+            else
+              sed -i '/android {/a\    ndkVersion = "28.2.13676358"' \
+                android/app/build.gradle.kts
+            fi
+          elif [ -f android/app/build.gradle ]; then
+            if grep -q "ndkVersion" android/app/build.gradle; then
+              sed -i -E \
+                's/ndkVersion[[:space:]]*[=:][[:space:]]*["'\'']?[0-9.]+["'\'']?/ndkVersion "28.2.13676358"/' \
+                android/app/build.gradle
+            else
+              sed -i '/android {/a\    ndkVersion "28.2.13676358"' \
+                android/app/build.gradle
+            fi
+          fi
 
       - name: Flutter pub get
         shell: bash
@@ -161,16 +198,19 @@ jobs:
 
           cd "$PROJECT_DIR"
 
+          rm -f pubspec.lock
+
           flutter pub get
 
-      - name: Verify dependency resolution
+      - name: Verify dependencies
         shell: bash
         run: |
           set -euo pipefail
 
           cd "$PROJECT_DIR"
 
-          dart pub deps --style=compact | grep -E "build_runner|isar_community_generator|dart_style" || true
+          dart pub deps --style=compact | grep -E \
+            "build_runner|isar_community_generator|dart_style" || true
 
       - name: Generate Isar code
         shell: bash
@@ -179,7 +219,8 @@ jobs:
 
           cd "$PROJECT_DIR"
 
-          dart run build_runner build --delete-conflicting-outputs
+          dart run build_runner build \
+            --delete-conflicting-outputs
 
       - name: Analyze
         shell: bash
@@ -269,17 +310,15 @@ jobs:
         run: |
           set -euo pipefail
 
-          BUILD_TOOLS_DIR="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+          BUILD_TOOLS_DIR="$(find "$ANDROID_HOME/build-tools" \
+            -mindepth 1 \
+            -maxdepth 1 \
+            -type d \
+            | sort -V \
+            | tail -n 1)"
 
-          if [ -z "$BUILD_TOOLS_DIR" ]; then
-            echo "::error::Android build-tools not found."
-            exit 1
-          fi
-
-          if [ ! -x "$BUILD_TOOLS_DIR/zipalign" ]; then
-            echo "::error::zipalign not found."
-            exit 1
-          fi
+          test -n "$BUILD_TOOLS_DIR"
+          test -x "$BUILD_TOOLS_DIR/zipalign"
 
           echo "ZIPALIGN=$BUILD_TOOLS_DIR/zipalign" >> "$GITHUB_ENV"
 
@@ -295,21 +334,17 @@ jobs:
           apks=(build/app/outputs/flutter-apk/*.apk)
 
           if [ "${#apks[@]}" -eq 0 ]; then
-            echo "::error::No APKs were produced."
+            echo "::error::No APKs produced."
             exit 1
           fi
 
           NDK_READELF="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
 
-          if [ ! -x "$NDK_READELF" ]; then
-            echo "::error::llvm-readelf not found."
-            exit 1
-          fi
+          test -x "$NDK_READELF"
 
           for apk in "${apks[@]}"; do
 
-            echo "Checking APK:"
-            echo "$apk"
+            echo "Checking $apk"
 
             "$ZIPALIGN" -c -P 16 -v 4 "$apk"
 
@@ -321,27 +356,27 @@ jobs:
 
               while IFS= read -r -d '' so; do
 
-                echo "Checking ELF:"
-                echo "$so"
+                echo "Checking ELF: $so"
 
-                while read -r alignment; do
+                "$NDK_READELF" -lW "$so" |
+                  awk '$1 == "LOAD" {print $NF}' |
+                  while read -r alignment; do
 
-                  value=$((alignment))
+                    value=$((alignment))
 
-                  if [ "$value" -lt 16384 ]; then
-                    echo "::error::ELF LOAD alignment is below 16 KiB:"
-                    echo "$so"
-                    echo "Alignment: $alignment"
-                    exit 1
-                  fi
+                    if [ "$value" -lt 16384 ]; then
+                      echo "::error::ELF LOAD alignment below 16 KiB: $so"
+                      echo "::error::Alignment: $alignment"
+                      exit 1
+                    fi
 
-                done < <(
-                  "$NDK_READELF" -lW "$so" |
-                  awk '$1 == "LOAD" {print $NF}'
-                )
+                  done
 
               done < <(
-                find "$TMP_DIR/lib" -type f -name "*.so" -print0
+                find "$TMP_DIR/lib" \
+                  -type f \
+                  -name "*.so" \
+                  -print0
               )
 
             fi
@@ -384,48 +419,45 @@ jobs:
 
           test -f aab-apks/universal.apk
 
-          "$ZIPALIGN" -c -P 16 -v 4 aab-apks/universal.apk
+          "$ZIPALIGN" -c -P 16 -v 4 \
+            aab-apks/universal.apk
 
           NDK_READELF="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
 
-          if [ ! -x "$NDK_READELF" ]; then
-            echo "::error::llvm-readelf not found."
-            exit 1
-          fi
+          test -x "$NDK_READELF"
 
           TMP_DIR="$(mktemp -d)"
 
           unzip -q \
             aab-apks/universal.apk \
             'lib/*/*.so' \
-            -d "$TMP_DIR" \
-            || true
+            -d "$TMP_DIR" || true
 
           if [ -d "$TMP_DIR/lib" ]; then
 
             while IFS= read -r -d '' so; do
 
-              echo "Checking AAB ELF:"
-              echo "$so"
+              echo "Checking AAB ELF: $so"
 
-              while read -r alignment; do
+              "$NDK_READELF" -lW "$so" |
+                awk '$1 == "LOAD" {print $NF}' |
+                while read -r alignment; do
 
-                value=$((alignment))
+                  value=$((alignment))
 
-                if [ "$value" -lt 16384 ]; then
-                  echo "::error::AAB ELF LOAD alignment is below 16 KiB:"
-                  echo "$so"
-                  echo "Alignment: $alignment"
-                  exit 1
-                fi
+                  if [ "$value" -lt 16384 ]; then
+                    echo "::error::AAB ELF LOAD alignment below 16 KiB: $so"
+                    echo "::error::Alignment: $alignment"
+                    exit 1
+                  fi
 
-              done < <(
-                "$NDK_READELF" -lW "$so" |
-                awk '$1 == "LOAD" {print $NF}'
-              )
+                done
 
             done < <(
-              find "$TMP_DIR/lib" -type f -name "*.so" -print0
+              find "$TMP_DIR/lib" \
+                -type f \
+                -name "*.so" \
+                -print0
             )
 
           fi
