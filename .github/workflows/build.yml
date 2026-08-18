@@ -215,8 +215,10 @@ jobs:
         run: |
           set -euo pipefail
           cd "$PROJECT_DIR"
-          # Clean stale build cache to fix package resolution
-          dart run build_runner clean
+          echo "Removing stale package cache to force fresh resolution..."
+          rm -rf .dart_tool
+          flutter pub get
+          echo "Running build_runner..."
           dart run build_runner build --delete-conflicting-outputs
 
       - name: Analyze
