@@ -2,8 +2,10 @@ name: Android Build
 
 on:
   push:
-    branches: [main]
-    tags: ['v*']
+    branches:
+      - main
+    tags:
+      - 'v*'
   pull_request:
 
 jobs:
@@ -30,7 +32,7 @@ jobs:
           cache: true
 
       # ============================================================
-      # FIND / EXTRACT FLUTTER PROJECT
+      # LOCATE FLUTTER PROJECT
       # ============================================================
       - name: Locate Flutter project
         shell: bash
@@ -40,16 +42,15 @@ jobs:
           echo "========================================"
           echo "Repository contents"
           echo "========================================"
+
           ls -la
 
           PROJECT_DIR=""
 
-          # 1. Check repository root
           if [ -f "pubspec.yaml" ]; then
             PROJECT_DIR="$(pwd)"
           fi
 
-          # 2. If not found, search existing directories
           if [ -z "$PROJECT_DIR" ]; then
             FOUND="$(find . -type f -name pubspec.yaml \
               -not -path './.git/*' \
@@ -60,32 +61,28 @@ jobs:
             fi
           fi
 
-          # 3. If still not found, extract ZIP files
           if [ -z "$PROJECT_DIR" ]; then
-            ZIP_FILE="$(find . -maxdepth 2 -type f -iname '*.zip' \
+            ZIP_FILE="$(find . -maxdepth 3 -type f -iname '*.zip' \
               -not -path './.git/*' \
               -print -quit || true)"
 
             if [ -z "$ZIP_FILE" ]; then
-              echo "::error::No pubspec.yaml and no ZIP file containing the Flutter project was found."
+              echo "::error::No Flutter project found."
               exit 1
             fi
 
-            echo "Found Flutter project archive:"
+            echo "Found ZIP:"
             echo "$ZIP_FILE"
 
             mkdir -p .ci-extracted
 
             unzip -q "$ZIP_FILE" -d .ci-extracted
 
-            echo "Extracted files:"
-            find .ci-extracted -maxdepth 3 -type f | head -200
-
             FOUND="$(find .ci-extracted -type f -name pubspec.yaml \
               -print -quit || true)"
 
             if [ -z "$FOUND" ]; then
-              echo "::error::ZIP was extracted, but no pubspec.yaml was found."
+              echo "::error::ZIP does not contain pubspec.yaml."
               exit 1
             fi
 
@@ -93,21 +90,16 @@ jobs:
           fi
 
           echo "========================================"
-          echo "Flutter project detected"
-          echo "========================================"
+          echo "Flutter project:"
           echo "$PROJECT_DIR"
+          echo "========================================"
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-
-          echo "========================================"
-          echo "Project contents"
-          echo "========================================"
-          ls -la "$PROJECT_DIR"
 
           test -f "$PROJECT_DIR/pubspec.yaml"
 
       # ============================================================
-      # ANDROID PLATFORM + GRADLE WRAPPER
+      # PREPARE ANDROID
       # ============================================================
       - name: Prepare Android platform
         shell: bash
@@ -116,66 +108,38 @@ jobs:
 
           cd "$PROJECT_DIR"
 
-          echo "========================================"
-          echo "Preparing Android platform"
-          echo "========================================"
-
-          echo "Project:"
-          pwd
-
-          echo "pubspec.yaml:"
-          test -f pubspec.yaml
-
           PROJECT_NAME="$(awk '/^name:/ {print $2; exit}' pubspec.yaml)"
 
           if [ -z "$PROJECT_NAME" ]; then
-            echo "::error::Could not determine Flutter project name from pubspec.yaml"
+            echo "::error::Could not determine project name."
             exit 1
           fi
 
           echo "Project name: $PROJECT_NAME"
 
-          # ----------------------------------------------------------
-          # Generate Android platform if missing
-          # ----------------------------------------------------------
           if [ ! -d android ]; then
-            echo "::warning::android/ directory is missing."
-            echo "Generating Android platform..."
+            echo "::warning::android/ is missing. Generating Android platform."
 
             flutter create \
               --platforms=android \
               --project-name "$PROJECT_NAME" \
               --org com.kikikokomama.musicplayer \
               .
-
-          else
-            echo "android/ directory already exists."
           fi
 
-          # ----------------------------------------------------------
-          # Ensure Gradle wrapper exists
-          # ----------------------------------------------------------
           if [ ! -f android/gradlew ] || \
              [ ! -f android/gradle/wrapper/gradle-wrapper.jar ] || \
              [ ! -f android/gradle/wrapper/gradle-wrapper.properties ]; then
 
             echo "::warning::Gradle wrapper is incomplete."
-            echo "Regenerating Android Gradle wrapper..."
+            echo "Regenerating Android platform."
 
             flutter create \
               --platforms=android \
               --project-name "$PROJECT_NAME" \
               --org com.kikikokomama.musicplayer \
               .
-
           fi
-
-          # ----------------------------------------------------------
-          # Final verification
-          # ----------------------------------------------------------
-          echo "========================================"
-          echo "Android verification"
-          echo "========================================"
 
           test -d android
           test -f android/gradlew
@@ -184,22 +148,16 @@ jobs:
 
           chmod +x android/gradlew
 
-          echo "Android directory:"
-          find android -maxdepth 3 -type f | sort | head -200
-
-          echo "Gradle wrapper:"
-          ls -lh android/gradlew
-          ls -lh android/gradle/wrapper/
+          echo "Android platform is ready."
 
       # ============================================================
-      # FLUTTER DEPENDENCIES
+      # FLUTTER PUB GET
       # ============================================================
       - name: Flutter pub get
         shell: bash
         run: |
           set -euo pipefail
           cd "$PROJECT_DIR"
-
           flutter pub get
 
       # ============================================================
@@ -311,7 +269,7 @@ jobs:
             --release
 
       # ============================================================
-      # VERIFY 16 KB APK ALIGNMENT
+      # VERIFY APK 16 KB ALIGNMENT
       # ============================================================
       - name: Verify 16 KB native-library alignment
         shell: bash
@@ -322,74 +280,50 @@ jobs:
 
           shopt -s nullglob
 
-          apks=(
-            build/app/outputs/flutter-apk/*.apk
-          )
+          apks=(build/app/outputs/flutter-apk/*.apk)
 
           if [ ${#apks[@]} -eq 0 ]; then
             echo "::error::No APKs produced."
             exit 1
           fi
 
-          NDK_READELF="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
-
-          test -x "$NDK_READELF"
-
           for apk in "${apks[@]}"; do
-
-            echo "========================================"
-            echo "Checking APK:"
+            echo "Checking:"
             echo "$apk"
-            echo "========================================"
 
             zipalign -c -P 16 -v 4 "$apk"
 
-            tmp="$(mktemp -d)"
+            TMP_DIR="$(mktemp -d)"
 
-            unzip -q "$apk" 'lib/*/*.so' -d "$tmp" || true
+            unzip -q "$apk" 'lib/*/*.so' -d "$TMP_DIR" || true
 
             while IFS= read -r -d '' so; do
+              echo "Checking ELF:"
+              echo "$so"
 
-              python3 - "$so" "$NDK_READELF" <<'PY'
-import subprocess
-import sys
+              "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" \
+                -l "$so" |
+              awk '
+                $1 == "LOAD" {
+                  align = $NF
+                  if (align ~ /^0x/) {
+                    value = strtonum(align)
 
-so = sys.argv[1]
-readelf = sys.argv[2]
-
-out = subprocess.check_output(
-    [readelf, "-l", so],
-    text=True,
-)
-
-aligns = []
-
-for line in out.splitlines():
-    fields = line.split()
-
-    if (
-        fields
-        and fields[0] == "LOAD"
-        and fields[-1].startswith("0x")
-    ):
-        aligns.append(int(fields[-1], 16))
-
-if aligns and min(aligns) < 0x4000:
-    raise SystemExit(
-        f"ELF LOAD alignment < 16 KiB: {so}: {aligns}"
-    )
-
-print(f"OK: {so}: {aligns}")
-PY
-
+                    if (value < 16384) {
+                      print "ERROR: ELF LOAD alignment < 16 KiB:"
+                      print $0
+                      exit 1
+                    }
+                  }
+                }
+              '
             done < <(
-              find "$tmp/lib" \
+              find "$TMP_DIR/lib" \
                 -name '*.so' \
                 -print0 2>/dev/null || true
             )
 
-            rm -rf "$tmp"
-
+            rm -rf "$TMP_DIR"
           done
 
       # ============================================================
@@ -429,64 +363,46 @@ PY
           zipalign -c -P 16 -v 4 \
             aab-apks/universal.apk
 
-          tmp="$(mktemp -d)"
+          TMP_DIR="$(mktemp -d)"
 
           unzip -q \
             aab-apks/universal.apk \
             'lib/*/*.so' \
-            -d "$tmp" || true
-
-          NDK_READELF="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
-
-          test -x "$NDK_READELF"
+            -d "$TMP_DIR" || true
 
           while IFS= read -r -d '' so; do
+            echo "Checking ELF:"
+            echo "$so"
 
-            python3 - "$so" "$NDK_READELF" <<'PY'
-import subprocess
-import sys
+            "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" \
+              -l "$so" |
+            awk '
+              $1 == "LOAD" {
+                align = $NF
+                if (align ~ /^0x/) {
+                  value = strtonum(align)
 
-so = sys.argv[1]
-readelf = sys.argv[2]
-
-out = subprocess.check_output(
-    [readelf, "-l", so],
-    text=True,
-)
-
-for line in out.splitlines():
-    fields = line.split()
-
-    if (
-        fields
-        and fields[0] == "LOAD"
-        and fields[-1].startswith("0x")
-    ):
-        alignment = int(fields[-1], 16)
-
-        if alignment < 0x4000:
-            raise SystemExit(
-                f"ELF LOAD alignment < 16 KiB: "
-                f"{so}: {fields[-1]}"
-            )
-
-print(f"OK: {so}")
-PY
-
+                  if (value < 16384) {
+                    print "ERROR: ELF LOAD alignment < 16 KiB:"
+                    print $0
+                    exit 1
+                  }
+                }
+              }
+            '
           done < <(
-            find "$tmp/lib" \
+            find "$TMP_DIR/lib" \
               -name '*.so' \
               -print0 2>/dev/null || true
           )
 
-          rm -rf \
-            "$tmp" \
-            aab-apks \
-            aab-universal.apks \
-            bundletool.jar
+          rm -rf "$TMP_DIR"
+          rm -rf aab-apks
+          rm -f aab-universal.apks
+          rm -f bundletool.jar
 
       # ============================================================
-      # UPLOAD BUILD ARTIFACTS
+      # UPLOAD ARTIFACTS
       # ============================================================
       - name: Upload APKs
         uses: actions/upload-artifact@v4
