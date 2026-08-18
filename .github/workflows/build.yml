@@ -90,20 +90,29 @@ jobs:
           dart --version
           java -version
 
-      - name: Fix Isar generator dependency
+      - name: Final Force-Pin Dependencies and Override Analyzer
         shell: bash
         run: |
           set -euo pipefail
           cd "$PROJECT_DIR"
           
-          # Remove old dependencies to allow a clean resolution
+          # 1. Remove conflicting dependencies
           flutter pub remove build_runner isar_community_generator || true
           
-          # Let pub solver automatically pick compatible versions based on your pubspec
-          flutter pub add dev:build_runner dev:isar_community_generator
+          # 2. Install the exact compatible working versions
+          flutter pub add dev:build_runner:2.4.11 dev:isar_community_generator:3.3.2
           
-          echo "Dependency configuration:"
-          grep -E "isar_community_generator:|build_runner:" pubspec.yaml || true
+          # 3. Inject a strict dependency override to lock analyzer to 5.13.0
+          # This completely stops the pub solver from pulling analyzer 10.2.0
+          if ! grep -q "dependency_overrides:" pubspec.yaml; then
+            printf "\ndependency_overrides:\n  analyzer: 5.13.0\n" >> pubspec.yaml
+          else
+            # If override section exists, we insert the line right after it
+            sed -i '/dependency_overrides:/a \ \ analyzer: 5.13.0' pubspec.yaml
+          fi
+          
+          echo "--- FINAL PUBSPEC CONFIGURATION ---"
+          grep -E "isar_community_generator:|build_runner:|analyzer:|dependency_overrides:" pubspec.yaml || true
 
       - name: Prepare Android platform
         shell: bash
@@ -203,7 +212,7 @@ jobs:
           cd "$PROJECT_DIR"
 
           dart pub deps --style=compact | grep -E \
-            "build_runner|isar_community_generator|dart_style" || true
+            "build_runner|isar_community_generator|dart_style|analyzer" || true
 
       - name: Generate Isar code
         shell: bash
@@ -211,8 +220,11 @@ jobs:
           set -euo pipefail
           cd "$PROJECT_DIR"
           
-          echo "Removing stale package cache to force fresh resolution..."
+          echo "Removing ALL caches to force a completely fresh clean resolution..."
           rm -rf .dart_tool
+          rm -f pubspec.lock
+          
+          echo "Fetching fresh dependencies..."
           flutter pub get
           
           echo "Running build_runner..."
