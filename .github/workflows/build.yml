@@ -97,16 +97,14 @@ jobs:
 
           cd "$PROJECT_DIR"
 
+          # Update isar_community_generator to ^3.3.2 regardless of previous version
           if grep -q "isar_community_generator:" pubspec.yaml; then
-            sed -i -E \
-              's/(isar_community_generator:[[:space:]]*)\^?3\.3\.[12]/\1^3.3.2/' \
-              pubspec.yaml
+            sed -i -E 's/(isar_community_generator:[[:space:]]*)\^?[0-9]+\.[0-9]+\.[0-9]+/\1^3.3.2/' pubspec.yaml
           fi
 
+          # Update build_runner to ^2.4.13 regardless of previous version
           if grep -q "build_runner:" pubspec.yaml; then
-            sed -i -E \
-              's/(build_runner:[[:space:]]*)\^?2\.4\.9/\12.4.13/' \
-              pubspec.yaml
+            sed -i -E 's/(build_runner:[[:space:]]*)\^?[0-9]+\.[0-9]+\.[0-9]+/\1^2.4.13/' pubspec.yaml
           fi
 
           echo "Dependency configuration:"
