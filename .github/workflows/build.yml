@@ -5,31 +5,62 @@ on:
     branches:
       - main
     tags:
-      - 'v*'
+      - "v*"
   pull_request:
+
+permissions:
+  contents: write
+
+env:
+  FLUTTER_VERSION: "3.44.7"
+  BUILD_RUNNER_VERSION: "^2.4.15"
+  NDK_VERSION: "28.0.13004108"
+  BUILD_TOOLS_VERSION: "35.0.0"
 
 jobs:
   build:
+    name: Flutter Android Build
     runs-on: ubuntu-latest
 
     steps:
+      # ============================================================
+      # CHECKOUT
+      # ============================================================
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      # ============================================================
+      # JAVA
+      # ============================================================
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: "17"
+          cache: gradle
 
+      # ============================================================
+      # FLUTTER
+      # ============================================================
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.44.7'
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
+
+      # ============================================================
+      # ANDROID SDK
+      # ============================================================
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: >-
+            platform-tools
+            build-tools;${{ env.BUILD_TOOLS_VERSION }}
+            ndk;${{ env.NDK_VERSION }}
 
       # ============================================================
       # LOCATE FLUTTER PROJECT
@@ -40,20 +71,30 @@ jobs:
           set -euo pipefail
 
           echo "========================================"
-          echo "Repository contents"
+          echo "Repository root"
           echo "========================================"
 
+          pwd
           ls -la
 
           PROJECT_DIR=""
 
+          # ----------------------------------------------------------
+          # 1. Flutter project at repository root
+          # ----------------------------------------------------------
           if [ -f "pubspec.yaml" ]; then
             PROJECT_DIR="$(pwd)"
           fi
 
+          # ----------------------------------------------------------
+          # 2. Search repository for pubspec.yaml
+          # ----------------------------------------------------------
           if [ -z "$PROJECT_DIR" ]; then
-            FOUND="$(find . -type f -name pubspec.yaml \
-              -not -path './.git/*' \
+            FOUND="$(find . \
+              -type f \
+              -name pubspec.yaml \
+              -not -path "./.git/*" \
+              -not -path "./.ci-extracted/*" \
               -print -quit || true)"
 
             if [ -n "$FOUND" ]; then
@@ -61,28 +102,38 @@ jobs:
             fi
           fi
 
+          # ----------------------------------------------------------
+          # 3. Extract ZIP if necessary
+          # ----------------------------------------------------------
           if [ -z "$PROJECT_DIR" ]; then
-            ZIP_FILE="$(find . -maxdepth 3 -type f -iname '*.zip' \
-              -not -path './.git/*' \
+            ZIP_FILE="$(find . \
+              -maxdepth 3 \
+              -type f \
+              \( -iname "*.zip" -o -iname "*.ZIP" \) \
+              -not -path "./.git/*" \
               -print -quit || true)"
 
             if [ -z "$ZIP_FILE" ]; then
               echo "::error::No Flutter project found."
+              echo "::error::pubspec.yaml is missing and no ZIP archive was found."
               exit 1
             fi
 
-            echo "Found ZIP:"
+            echo "Found archive:"
             echo "$ZIP_FILE"
 
+            rm -rf .ci-extracted
             mkdir -p .ci-extracted
 
             unzip -q "$ZIP_FILE" -d .ci-extracted
 
-            FOUND="$(find .ci-extracted -type f -name pubspec.yaml \
+            FOUND="$(find .ci-extracted \
+              -type f \
+              -name pubspec.yaml \
               -print -quit || true)"
 
             if [ -z "$FOUND" ]; then
-              echo "::error::ZIP does not contain pubspec.yaml."
+              echo "::error::ZIP archive does not contain pubspec.yaml."
               exit 1
             fi
 
@@ -90,16 +141,40 @@ jobs:
           fi
 
           echo "========================================"
-          echo "Flutter project:"
-          echo "$PROJECT_DIR"
+          echo "Flutter project"
           echo "========================================"
 
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "$PROJECT_DIR"
 
           test -f "$PROJECT_DIR/pubspec.yaml"
 
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+          echo "========================================"
+          echo "Project files"
+          echo "========================================"
+
+          ls -la "$PROJECT_DIR"
+
       # ============================================================
-      # PREPARE ANDROID
+      # DIAGNOSE FLUTTER / DART
+      # ============================================================
+      - name: Diagnose Flutter environment
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd "$PROJECT_DIR"
+
+          flutter --version
+          dart --version
+          flutter doctor -v
+
+          echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-}"
+          echo "ANDROID_HOME=${ANDROID_HOME:-}"
+
+      # ============================================================
+      # PREPARE ANDROID PLATFORM
       # ============================================================
       - name: Prepare Android platform
         shell: bash
@@ -111,14 +186,18 @@ jobs:
           PROJECT_NAME="$(awk '/^name:/ {print $2; exit}' pubspec.yaml)"
 
           if [ -z "$PROJECT_NAME" ]; then
-            echo "::error::Could not determine project name."
+            echo "::error::Could not determine project name from pubspec.yaml."
             exit 1
           fi
 
           echo "Project name: $PROJECT_NAME"
 
+          # ----------------------------------------------------------
+          # Generate Android platform only if completely missing
+          # ----------------------------------------------------------
           if [ ! -d android ]; then
-            echo "::warning::android/ is missing. Generating Android platform."
+            echo "::warning::android/ is missing."
+            echo "Generating Android platform..."
 
             flutter create \
               --platforms=android \
@@ -127,12 +206,15 @@ jobs:
               .
           fi
 
+          # ----------------------------------------------------------
+          # Ensure Gradle wrapper exists
+          # ----------------------------------------------------------
           if [ ! -f android/gradlew ] || \
              [ ! -f android/gradle/wrapper/gradle-wrapper.jar ] || \
              [ ! -f android/gradle/wrapper/gradle-wrapper.properties ]; then
 
             echo "::warning::Gradle wrapper is incomplete."
-            echo "Regenerating Android platform."
+            echo "Regenerating Android platform files..."
 
             flutter create \
               --platforms=android \
@@ -148,7 +230,38 @@ jobs:
 
           chmod +x android/gradlew
 
-          echo "Android platform is ready."
+          echo "Android platform ready."
+          echo "Gradle wrapper:"
+          android/gradlew --version
+
+      # ============================================================
+      # FIX ISAR / BUILD_RUNNER COMPATIBILITY
+      # ============================================================
+      - name: Fix build_runner compatibility
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd "$PROJECT_DIR"
+
+          echo "========================================"
+          echo "Checking build_runner constraint"
+          echo "========================================"
+
+          grep -n -A20 -B5 "dev_dependencies:" pubspec.yaml || true
+          grep -n "build_runner" pubspec.yaml || true
+          grep -n "isar_community_generator" pubspec.yaml || true
+
+          echo "Updating build_runner to a version compatible with"
+          echo "isar_community_generator 3.3.x..."
+
+          dart pub add --dev "build_runner:${BUILD_RUNNER_VERSION}"
+
+          echo "========================================"
+          echo "Updated dependency declarations"
+          echo "========================================"
+
+          grep -n "build_runner" pubspec.yaml || true
 
       # ============================================================
       # FLUTTER PUB GET
@@ -157,8 +270,29 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           cd "$PROJECT_DIR"
+
           flutter pub get
+
+      # ============================================================
+      # SHOW RESOLVED GENERATOR VERSIONS
+      # ============================================================
+      - name: Verify Dart build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd "$PROJECT_DIR"
+
+          echo "========================================"
+          echo "Resolved packages"
+          echo "========================================"
+
+          dart pub deps --style=compact | \
+            grep -E \
+            "build_runner|isar_community|isar_community_generator|dart_style|analyzer" \
+            || true
 
       # ============================================================
       # ISAR CODE GENERATION
@@ -167,6 +301,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           cd "$PROJECT_DIR"
 
           dart run build_runner build \
@@ -179,6 +314,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           cd "$PROJECT_DIR"
 
           flutter analyze
@@ -190,6 +326,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           cd "$PROJECT_DIR"
 
           flutter test
@@ -202,6 +339,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           cd "$PROJECT_DIR"
 
           flutter build apk \
@@ -229,7 +367,8 @@ jobs:
           test -n "$ANDROID_KEY_ALIAS"
           test -n "$ANDROID_KEY_PASSWORD"
 
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/release-key.jks
+          echo "$ANDROID_KEYSTORE_BASE64" | \
+            base64 --decode > android/release-key.jks
 
           cat > android/key.properties <<EOF
           storeFile=release-key.jks
@@ -249,6 +388,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           cd "$PROJECT_DIR"
 
           flutter build apk \
@@ -263,15 +403,37 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           cd "$PROJECT_DIR"
 
           flutter build appbundle \
             --release
 
       # ============================================================
-      # VERIFY APK 16 KB ALIGNMENT
+      # FIND AND VERIFY ZIPALIGN
       # ============================================================
-      - name: Verify 16 KB native-library alignment
+      - name: Locate Android build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ZIPALIGN="$ANDROID_SDK_ROOT/build-tools/${BUILD_TOOLS_VERSION}/zipalign"
+
+          if [ ! -x "$ZIPALIGN" ]; then
+            echo "::error::zipalign not found:"
+            echo "$ZIPALIGN"
+            exit 1
+          fi
+
+          echo "ZIPALIGN=$ZIPALIGN" >> "$GITHUB_ENV"
+
+          echo "Using:"
+          "$ZIPALIGN" -h | head -5
+
+      # ============================================================
+      # VERIFY 16 KB APK ALIGNMENT
+      # ============================================================
+      - name: Verify 16 KB APK alignment
         shell: bash
         run: |
           set -euo pipefail
@@ -280,56 +442,148 @@ jobs:
 
           shopt -s nullglob
 
-          apks=(build/app/outputs/flutter-apk/*.apk)
+          APKS=(
+            build/app/outputs/flutter-apk/*.apk
+          )
 
-          if [ ${#apks[@]} -eq 0 ]; then
-            echo "::error::No APKs produced."
+          if [ "${#APKS[@]}" -eq 0 ]; then
+            echo "::error::No APK files were produced."
             exit 1
           fi
 
-          for apk in "${apks[@]}"; do
-            echo "Checking:"
-            echo "$apk"
+          NDK_READELF="$ANDROID_SDK_ROOT/ndk/${NDK_VERSION}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
 
-            zipalign -c -P 16 -v 4 "$apk"
+          if [ ! -x "$NDK_READELF" ]; then
+            echo "::error::llvm-readelf not found:"
+            echo "$NDK_READELF"
+            exit 1
+          fi
+
+          for APK in "${APKS[@]}"; do
+
+            echo "========================================"
+            echo "16 KB verification"
+            echo "APK: $APK"
+            echo "========================================"
+
+            # ZIP alignment of native libraries.
+            "$ZIPALIGN" -c -P 16 -v 4 "$APK"
 
             TMP_DIR="$(mktemp -d)"
 
-            unzip -q "$apk" 'lib/*/*.so' -d "$TMP_DIR" || true
+            unzip -q "$APK" 'lib/*/*.so' -d "$TMP_DIR" || true
 
-            while IFS= read -r -d '' so; do
+            SO_FOUND=0
+
+            while IFS= read -r -d '' SO; do
+              SO_FOUND=1
+
               echo "Checking ELF:"
-              echo "$so"
+              echo "$SO"
 
-              "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" \
-                -l "$so" |
-              awk '
-                $1 == "LOAD" {
-                  align = $NF
-                  if (align ~ /^0x/) {
-                    value = strtonum(align)
+              LOAD_LINES="$(
+                "$NDK_READELF" -lW "$SO" |
+                awk '$1 == "LOAD" {print}'
+              )"
 
-                    if (value < 16384) {
-                      print "ERROR: ELF LOAD alignment < 16 KiB:"
-                      print $0
+              if [ -z "$LOAD_LINES" ]; then
+                echo "::warning::No LOAD segments found in $SO"
+                continue
+              fi
+
+              echo "$LOAD_LINES"
+
+              while IFS= read -r LINE; do
+                [ -z "$LINE" ] && continue
+
+                ALIGN="$(
+                  echo "$LINE" |
+                  awk '{print $NF}'
+                )"
+
+                case "$ALIGN" in
+                  0x*)
+                    VALUE=$((ALIGN))
+
+                    if [ "$VALUE" -lt 16384 ]; then
+                      echo "::error::ELF LOAD alignment below 16 KiB:"
+                      echo "$SO"
+                      echo "$LINE"
                       exit 1
-                    }
-                  }
-                }
-              '
+                    fi
+                    ;;
+                  *)
+                    echo "::error::Could not parse ELF alignment:"
+                    echo "$LINE"
+                    exit 1
+                    ;;
+                esac
+
+              done <<< "$LOAD_LINES"
+
+              echo "OK: $SO"
+
             done < <(
               find "$TMP_DIR/lib" \
-                -name '*.so' \
+                -type f \
+                -name "*.so" \
                 -print0 2>/dev/null || true
             )
 
+            if [ "$SO_FOUND" -eq 0 ]; then
+              echo "No native .so files found in this APK."
+            fi
+
             rm -rf "$TMP_DIR"
+
+            echo "APK passed 16 KB alignment verification."
+
           done
 
       # ============================================================
-      # VERIFY AAB GENERATED APK
+      # VERIFY AAB CONFIG
       # ============================================================
-      - name: Verify 16 KB alignment in AAB-generated APK
+      - name: Verify AAB 16 KB configuration
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd "$PROJECT_DIR"
+
+          AAB="build/app/outputs/bundle/release/app-release.aab"
+
+          test -f "$AAB"
+
+          BUNDLETOOL_VERSION="1.18.1"
+
+          curl -fsSL \
+            -o bundletool.jar \
+            "https://github.com/google/bundletool/releases/download/${BUNDLETOOL_VERSION}/bundletool-all-${BUNDLETOOL_VERSION}.jar"
+
+          echo "========================================"
+          echo "Checking AAB bundle configuration"
+          echo "========================================"
+
+          java -jar bundletool.jar \
+            dump config \
+            --bundle="$AAB" |
+            tee bundle-config.txt
+
+          if grep -q "PAGE_ALIGNMENT_16K" bundle-config.txt; then
+            echo "OK: AAB requests PAGE_ALIGNMENT_16K."
+          else
+            echo "::warning::AAB does not report PAGE_ALIGNMENT_16K."
+            echo "The AAB configuration is:"
+            grep -i "alignment" bundle-config.txt || true
+          fi
+
+          rm -f bundle-config.txt bundletool.jar
+
+      # ============================================================
+      # VERIFY AAB-GENERATED UNIVERSAL APK
+      # ============================================================
+      - name: Verify 16 KB AAB-generated APK
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -341,85 +595,133 @@ jobs:
 
           cd "$PROJECT_DIR"
 
+          AAB="build/app/outputs/bundle/release/app-release.aab"
+
+          test -f "$AAB"
+          test -f android/release-key.jks
+
           BUNDLETOOL_VERSION="1.18.1"
 
           curl -fsSL \
             -o bundletool.jar \
             "https://github.com/google/bundletool/releases/download/${BUNDLETOOL_VERSION}/bundletool-all-${BUNDLETOOL_VERSION}.jar"
 
+          rm -rf aab-apks
+          rm -f aab-universal.apks
+
           java -jar bundletool.jar build-apks \
-            --bundle=build/app/outputs/bundle/release/app-release.aab \
+            --bundle="$AAB" \
             --output=aab-universal.apks \
             --mode=universal \
             --ks=android/release-key.jks \
-            --ks-pass=pass:"$ANDROID_KEYSTORE_PASSWORD" \
+            --ks-pass="pass:$ANDROID_KEYSTORE_PASSWORD" \
             --ks-key-alias="$ANDROID_KEY_ALIAS" \
-            --key-pass=pass:"$ANDROID_KEY_PASSWORD"
+            --key-pass="pass:$ANDROID_KEY_PASSWORD"
 
-          unzip -q aab-universal.apks -d aab-apks
+          mkdir -p aab-apks
 
-          test -f aab-apks/universal.apk
+          unzip -q \
+            aab-universal.apks \
+            -d aab-apks
 
-          zipalign -c -P 16 -v 4 \
-            aab-apks/universal.apk
+          UNIVERSAL_APK="aab-apks/universal.apk"
+
+          test -f "$UNIVERSAL_APK"
+
+          echo "========================================"
+          echo "Checking universal APK"
+          echo "========================================"
+
+          "$ZIPALIGN" -c -P 16 -v 4 "$UNIVERSAL_APK"
+
+          NDK_READELF="$ANDROID_SDK_ROOT/ndk/${NDK_VERSION}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
+
+          test -x "$NDK_READELF"
 
           TMP_DIR="$(mktemp -d)"
 
           unzip -q \
-            aab-apks/universal.apk \
+            "$UNIVERSAL_APK" \
             'lib/*/*.so' \
             -d "$TMP_DIR" || true
 
-          while IFS= read -r -d '' so; do
-            echo "Checking ELF:"
-            echo "$so"
+          SO_FOUND=0
 
-            "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" \
-              -l "$so" |
-            awk '
-              $1 == "LOAD" {
-                align = $NF
-                if (align ~ /^0x/) {
-                  value = strtonum(align)
+          while IFS= read -r -d '' SO; do
+            SO_FOUND=1
 
-                  if (value < 16384) {
-                    print "ERROR: ELF LOAD alignment < 16 KiB:"
-                    print $0
+            echo "Checking:"
+            echo "$SO"
+
+            LOAD_LINES="$(
+              "$NDK_READELF" -lW "$SO" |
+              awk '$1 == "LOAD" {print}'
+            )"
+
+            while IFS= read -r LINE; do
+              [ -z "$LINE" ] && continue
+
+              ALIGN="$(echo "$LINE" | awk '{print $NF}')"
+
+              case "$ALIGN" in
+                0x*)
+                  VALUE=$((ALIGN))
+
+                  if [ "$VALUE" -lt 16384 ]; then
+                    echo "::error::AAB-generated APK contains ELF LOAD alignment below 16 KiB."
+                    echo "$SO"
+                    echo "$LINE"
                     exit 1
-                  }
-                }
-              }
-            '
+                  fi
+                  ;;
+                *)
+                  echo "::error::Unable to parse ELF alignment."
+                  echo "$LINE"
+                  exit 1
+                  ;;
+              esac
+
+            done <<< "$LOAD_LINES"
+
+            echo "OK: $SO"
+
           done < <(
             find "$TMP_DIR/lib" \
-              -name '*.so' \
+              -type f \
+              -name "*.so" \
               -print0 2>/dev/null || true
           )
 
-          rm -rf "$TMP_DIR"
-          rm -rf aab-apks
-          rm -f aab-universal.apks
-          rm -f bundletool.jar
+          if [ "$SO_FOUND" -eq 0 ]; then
+            echo "No native .so files found in universal APK."
+          fi
+
+          rm -rf \
+            "$TMP_DIR" \
+            aab-apks \
+            aab-universal.apks \
+            bundletool.jar
 
       # ============================================================
       # UPLOAD ARTIFACTS
       # ============================================================
-      - name: Upload APKs
+      - name: Upload APKs and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: offline-music-player-apks
+          name: offline-music-player-build
+          if-no-files-found: error
           path: |
             ${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/*.apk
             ${{ env.PROJECT_DIR }}/build/app/outputs/bundle/release/*.aab
-          if-no-files-found: error
 
       # ============================================================
       # GITHUB RELEASE
       # ============================================================
-      - name: Create GitHub release for tag
+      - name: Create GitHub release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
+          generate_release_notes: true
           files: |
             ${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/*.apk
             ${{ env.PROJECT_DIR }}/build/app/outputs/bundle/release/*.aab
@@ -431,6 +733,10 @@ jobs:
         if: always() && startsWith(github.ref, 'refs/tags/v')
         shell: bash
         run: |
-          rm -f \
-            "$PROJECT_DIR/android/release-key.jks" \
-            "$PROJECT_DIR/android/key.properties"
+          set +e
+
+          if [ -n "${PROJECT_DIR:-}" ]; then
+            rm -f \
+              "$PROJECT_DIR/android/release-key.jks" \
+              "$PROJECT_DIR/android/key.properties"
+          fi
