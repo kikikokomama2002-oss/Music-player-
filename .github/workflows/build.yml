@@ -90,7 +90,7 @@ jobs:
           dart --version
           java -version
 
-      - name: Resolve Compatible Dependencies
+      - name: Fix Isar version mismatch (Pin to 3.3.1)
         shell: bash
         run: |
           set -euo pipefail
@@ -99,12 +99,15 @@ jobs:
           # Remove all old conflicting packages
           flutter pub remove build_runner isar_community isar_community_flutter_libs isar_community_generator dart_style analyzer || true
 
-          # Let Pub resolve the exact mutually-compatible versions automatically
-          flutter pub add isar_community isar_community_flutter_libs
-          flutter pub add dev:build_runner dev:isar_community_generator
+          # CRITICAL FIX: Pin ALL Isar packages to EXACTLY 3.3.1.
+          # This aligns the runtime, native libs, and generator perfectly.
+          flutter pub add isar_community:3.3.1 isar_community_flutter_libs:3.3.1
+          
+          # Let pub resolve the latest build_runner (2.5.x), which natively supports dart_style 3.x.
+          flutter pub add dev:build_runner dev:isar_community_generator:3.3.1
 
           echo "--- FINAL PUBSPEC CONFIGURATION ---"
-          grep -E "isar_community:|isar_community_flutter_libs:|isar_community_generator:|build_runner:|dart_style:" pubspec.yaml || true
+          grep -E "isar_community:|isar_community_flutter_libs:|isar_community_generator:|build_runner:" pubspec.yaml || true
 
       - name: Prepare Android platform
         shell: bash
