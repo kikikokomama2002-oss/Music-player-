@@ -95,24 +95,22 @@ jobs:
         run: |
           set -euo pipefail
           cd "$PROJECT_DIR"
-          
+
           # Remove all old conflicting packages
           flutter pub remove build_runner isar_community isar_community_flutter_libs isar_community_generator dart_style analyzer || true
-          
-          # 1. Pin Isar core and native libs to 3.3.2 (they must match!)
-          flutter pub add isar_community:3.3.2 isar_community_flutter_libs:3.3.2
-          
-          # 2. Pin build runner and generator
-          flutter pub add dev:build_runner:2.4.13 dev:isar_community_generator:3.3.2
-          
-          # 3. Remove any previous dependency overrides
+
+          # Pin all Isar packages to the SAME compatible version set (3.3.1)
+          flutter pub add isar_community:3.3.1 isar_community_flutter_libs:3.3.1
+          flutter pub add dev:build_runner:2.4.13 dev:isar_community_generator:3.3.1
+
+          # Clean up previous overrides
           if grep -q "dependency_overrides:" pubspec.yaml; then
             sed -i '/dependency_overrides:/,/^[^ ]/d' pubspec.yaml
           fi
-          
-          # 4. Inject the critical dart_style override (Fixes the pub deadlock loop)
+
+          # Inject the critical dart_style override to fix pub deadlock
           printf "\ndependency_overrides:\n  dart_style: 3.0.1\n" >> pubspec.yaml
-          
+
           echo "--- FINAL PUBSPEC CONFIGURATION ---"
           grep -E "isar_community:|isar_community_flutter_libs:|isar_community_generator:|build_runner:|dart_style:|dependency_overrides:" pubspec.yaml || true
 
