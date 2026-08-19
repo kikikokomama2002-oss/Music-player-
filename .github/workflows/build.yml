@@ -90,20 +90,27 @@ jobs:
           dart --version
           java -version
 
-      - name: Final Force-Pin Dependencies
+      - name: Final Force-Pin Compatible Dependencies
         shell: bash
         run: |
           set -euo pipefail
           cd "$PROJECT_DIR"
           
-          # Remove old/conflicting dependencies
-          flutter pub remove build_runner isar_community_generator dart_style || true
+          # Remove all conflicts
+          flutter pub remove build_runner isar_community isar_community_generator dart_style analyzer || true
           
-          # Install the exact compatible versions (build_runner >= 2.4.14 is REQUIRED)
-          flutter pub add dev:build_runner:2.4.15 dev:isar_community_generator:3.3.2
+          # Install the known-stable working versions (Isar 3.3.1 fixes the dart_style deadlock)
+          flutter pub add isar_community:3.3.1
+          flutter pub add dev:build_runner:2.4.13 dev:isar_community_generator:3.3.1
+          
+          # Override analyzer to 5.13.0 to prevent it from pulling 10.x and crashing
+          if grep -q "dependency_overrides:" pubspec.yaml; then
+            sed -i '/dependency_overrides:/,/^[^ ]/d' pubspec.yaml
+          fi
+          printf "\ndependency_overrides:\n  analyzer: 5.13.0\n" >> pubspec.yaml
           
           echo "--- FINAL PUBSPEC CONFIGURATION ---"
-          grep -E "isar_community_generator:|build_runner:" pubspec.yaml || true
+          grep -E "isar_community:|isar_community_generator:|build_runner:|analyzer:|dependency_overrides:" pubspec.yaml || true
 
       - name: Prepare Android platform
         shell: bash
@@ -203,7 +210,7 @@ jobs:
           cd "$PROJECT_DIR"
 
           dart pub deps --style=compact | grep -E \
-            "build_runner|isar_community_generator|dart_style" || true
+            "build_runner|isar_community_generator|dart_style|analyzer" || true
 
       - name: Generate Isar code
         shell: bash
