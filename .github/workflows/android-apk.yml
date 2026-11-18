@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - master
+      - cadence-studio
   pull_request:
   workflow_dispatch:
 
