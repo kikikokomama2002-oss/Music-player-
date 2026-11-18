@@ -1,0 +1,6 @@
+{
+  "name": "Cadence Studio",
+  "description": "Pro hi-fi music listening studio with curated catalog, real-time Web Audio synthesis, 5-band studio equalizer, queue management, and lossless editorial design.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

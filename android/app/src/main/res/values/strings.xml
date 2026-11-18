@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Cadence Studio</string>
+    <string name="title_activity_main">Cadence Studio</string>
+    <string name="package_name">com.cadence.studio</string>
+    <string name="custom_url_scheme">com.cadence.studio</string>
+</resources>
