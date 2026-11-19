@@ -1,6 +1,6 @@
 {
   "name": "Cadence Studio",
-  "description": "Pro hi-fi music listening studio with curated catalog, real-time Web Audio synthesis, 5-band studio equalizer, queue management, and lossless editorial design.",
+  "description": "Offline Android & desktop hi-fi music player powered by Android MediaStore scanning, Media3 ExoPlayer background playback, synced LRC lyrics, and hardware audio effects.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -31,9 +31,6 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
-        with:
-          packages: platform-tools
-
       - name: Install Android SDK 36
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
 
@@ -41,7 +38,7 @@ jobs:
         run: npm install
 
       - name: Run unit tests
-        run: npm test
+        run: npx tsx --test src/utils/musicLogic.test.ts
 
       - name: Type-check web app
         run: npm run lint

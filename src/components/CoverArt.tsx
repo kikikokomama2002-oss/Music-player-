@@ -1,11 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Disc3 } from 'lucide-react';
 
 interface CoverArtProps {
-  src: string;
+  src?: string;
   alt: string;
   className?: string;
   size?: 'sm' | 'md' | 'lg';
+  fit?: 'cover' | 'contain';
 }
 
 export function CoverArt({
@@ -13,19 +14,24 @@ export function CoverArt({
   alt,
   className = '',
   size = 'md',
+  fit = 'cover',
 }: CoverArtProps) {
   const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [src]);
 
   if (failed || !src) {
     return (
       <div
         role="img"
         aria-label={alt}
-        className={`flex flex-col items-center justify-center bg-gradient-to-br from-[#222229] via-[#17171C] to-[#0F0F12] text-[#6E6E78] border border-white/[0.08] ${className}`}
+        className={`flex items-center justify-center bg-zinc-200 dark:bg-[#19191F] text-zinc-500 dark:text-[#6E6E78] border border-zinc-300/70 dark:border-white/[0.08] ${className}`}
       >
         <Disc3
           className={
-            size === 'sm' ? 'w-4 h-4' : size === 'lg' ? 'w-12 h-12' : 'w-7 h-7'
+            size === 'sm' ? 'w-4 h-4' : size === 'lg' ? 'w-14 h-14' : 'w-8 h-8'
           }
           strokeWidth={1.5}
         />
@@ -39,7 +45,9 @@ export function CoverArt({
       alt={alt}
       referrerPolicy="no-referrer"
       onError={() => setFailed(true)}
-      className={`object-cover bg-[#18181D] ${className}`}
+      className={`${
+        fit === 'contain' ? 'object-contain' : 'object-cover'
+      } bg-zinc-200 dark:bg-[#18181D] ${className}`}
     />
   );
 }

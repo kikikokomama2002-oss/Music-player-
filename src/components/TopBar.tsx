@@ -1,124 +1,143 @@
-import { ListOrdered, Search, X } from 'lucide-react';
-import type { GenreFilter, ViewTab } from '../types/music';
+import {
+  FolderPlus,
+  ListOrdered,
+  Moon,
+  RefreshCw,
+  Search,
+  Sun,
+  X,
+} from 'lucide-react';
+import type { ThemeMode } from '../types/music';
 
 interface TopBarProps {
-  activeView: ViewTab;
   searchQuery: string;
-  genreFilter: GenreFilter;
   queueCount: number;
   isQueueOpen: boolean;
+  isScanning: boolean;
+  isNativeAndroid: boolean;
+  theme: ThemeMode;
   onSearchChange: (q: string) => void;
-  onGenreChange: (g: GenreFilter) => void;
   onToggleQueue: () => void;
+  onRescan: () => void;
+  onImportFiles: () => void;
+  onToggleTheme: () => void;
   onNavigateHome: () => void;
 }
 
-const GENRE_OPTIONS: GenreFilter[] = [
-  'All',
-  'Electronic',
-  'Ambient',
-  'Jazz',
-  'Acoustic',
-];
-
 export function TopBar({
-  activeView,
   searchQuery,
-  genreFilter,
   queueCount,
   isQueueOpen,
+  isScanning,
+  isNativeAndroid,
+  theme,
   onSearchChange,
-  onGenreChange,
   onToggleQueue,
+  onRescan,
+  onImportFiles,
+  onToggleTheme,
   onNavigateHome,
 }: TopBarProps) {
   return (
-    <header className="lg:sticky lg:top-0 z-20 bg-[#0B0B0D]/90 backdrop-blur-md border-b border-white/[0.07]">
-      <div className="px-4 sm:px-8 py-3 sm:py-3.5 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 lg:gap-6">
-        {/* Top Row on Mobile: Brand + Queue; Desktop: Search */}
-        <div className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-3 flex-1 min-w-0">
+    <header className="lg:sticky lg:top-0 z-20 bg-stone-50/90 dark:bg-[#0B0B0D]/90 backdrop-blur-md border-b border-zinc-200 dark:border-white/[0.07]">
+      <div className="px-4 sm:px-8 py-3 flex flex-wrap sm:flex-nowrap items-center justify-between gap-3">
+        {/* Mobile Brand */}
+        <button
+          type="button"
+          onClick={onNavigateHome}
+          className="lg:hidden font-semibold text-lg tracking-[-0.02em] text-zinc-900 dark:text-[#F4F4F6] whitespace-nowrap shrink-0 order-1"
+        >
+          Cadence
+        </button>
+
+        {/* Right Controls on Mobile, Trailing on Desktop */}
+        <div className="flex items-center gap-2 order-2 sm:order-3 shrink-0">
           <button
             type="button"
-            onClick={onNavigateHome}
-            className="lg:hidden font-semibold text-lg tracking-[-0.02em] text-[#F4F4F6] whitespace-nowrap shrink-0 order-1"
+            onClick={onToggleTheme}
+            aria-label={
+              theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'
+            }
+            className="lg:hidden min-w-[40px] min-h-[40px] rounded-lg border border-zinc-200 dark:border-white/[0.08] bg-white dark:bg-[#151519] flex items-center justify-center text-zinc-600 dark:text-[#9C9CA6]"
           >
-            Cadence
+            {theme === 'dark' ? (
+              <Sun className="w-4 h-4" strokeWidth={1.75} />
+            ) : (
+              <Moon className="w-4 h-4" strokeWidth={1.75} />
+            )}
           </button>
+
+          {isNativeAndroid ? (
+            <button
+              type="button"
+              onClick={onRescan}
+              disabled={isScanning}
+              aria-label="Scan device audio library"
+              className="min-h-[40px] px-3 py-2 rounded-lg border border-zinc-200 dark:border-white/[0.08] bg-white dark:bg-[#151519] text-xs font-medium text-zinc-700 dark:text-[#C4C4CC] hover:text-zinc-900 dark:hover:text-[#F4F4F6] inline-flex items-center gap-2 whitespace-nowrap shrink-0 disabled:opacity-50"
+            >
+              <RefreshCw
+                className={`w-3.5 h-3.5 ${isScanning ? 'animate-spin' : ''}`}
+              />
+              <span>{isScanning ? 'Scanning...' : 'Scan'}</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onImportFiles}
+              className="min-h-[40px] px-3 py-2 rounded-lg border border-zinc-200 dark:border-white/[0.08] bg-white dark:bg-[#151519] text-xs font-medium text-zinc-700 dark:text-[#C4C4CC] hover:text-zinc-900 dark:hover:text-[#F4F4F6] inline-flex items-center gap-2 whitespace-nowrap shrink-0"
+            >
+              <FolderPlus className="w-3.5 h-3.5 text-[#E85D3F]" />
+              <span>Add Audio</span>
+            </button>
+          )}
 
           <button
             type="button"
             onClick={onToggleQueue}
             aria-label={isQueueOpen ? 'Hide queue' : 'Show queue'}
             aria-expanded={isQueueOpen}
-            className={`xl:hidden min-h-[40px] px-3 py-2 rounded-lg border text-xs font-medium flex items-center gap-2 whitespace-nowrap shrink-0 transition-colors order-2 sm:order-3 ${
+            className={`xl:hidden min-h-[40px] px-3 py-2 rounded-lg border text-xs font-medium flex items-center gap-2 whitespace-nowrap shrink-0 transition-colors ${
               isQueueOpen
-                ? 'bg-[#1D1D22] border-white/20 text-[#F4F4F6]'
-                : 'bg-[#151519] border-white/[0.08] text-[#9C9CA6] hover:text-[#F4F4F6]'
+                ? 'bg-zinc-200 dark:bg-[#1D1D22] border-zinc-300 dark:border-white/20 text-zinc-900 dark:text-[#F4F4F6]'
+                : 'bg-white dark:bg-[#151519] border-zinc-200 dark:border-white/[0.08] text-zinc-600 dark:text-[#9C9CA6] hover:text-zinc-900 dark:hover:text-[#F4F4F6]'
             }`}
           >
             <ListOrdered className="w-4 h-4" strokeWidth={1.75} />
             <span>Queue</span>
-            <span className="font-mono tabular-nums text-[#7C7C87]">
+            <span className="font-mono tabular-nums text-zinc-500 dark:text-[#7C7C87]">
               {queueCount}
             </span>
           </button>
-
-          <div className="relative w-full sm:flex-1 sm:max-w-md order-3 sm:order-2">
-            <label htmlFor="catalog-search" className="sr-only">
-              Search tracks, albums, or artists
-            </label>
-            <Search
-              className="w-4 h-4 text-[#6E6E78] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
-              strokeWidth={1.75}
-            />
-            <input
-              id="catalog-search"
-              type="search"
-              value={searchQuery}
-              onChange={(e) => onSearchChange(e.target.value)}
-              placeholder="Search tracks, artists, albums..."
-              className="w-full h-10 pl-10 pr-9 bg-[#151519] border border-white/[0.08] rounded-lg text-sm text-[#F4F4F6] placeholder-[#6E6E78] focus:outline-none focus:border-[#E85D3F] transition-colors"
-            />
-            {searchQuery && (
-              <button
-                type="button"
-                onClick={() => onSearchChange('')}
-                aria-label="Clear search"
-                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[#7C7C87] hover:text-[#F4F4F6] rounded"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
         </div>
 
-        {/* Genre Filter Segmented Control (shown on Discover & Library) */}
-        {(activeView === 'discover' || activeView === 'library') && (
-          <div
-            role="group"
-            aria-label="Filter by genre"
-            className="flex items-center gap-1 p-1 bg-[#141418] border border-white/[0.07] rounded-lg overflow-x-auto no-scrollbar shrink-0"
-          >
-            {GENRE_OPTIONS.map((genre) => {
-              const active = genreFilter === genre;
-              return (
-                <button
-                  key={genre}
-                  type="button"
-                  onClick={() => onGenreChange(genre)}
-                  aria-pressed={active}
-                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors duration-150 whitespace-nowrap shrink-0 min-h-[32px] focus-visible:outline-2 focus-visible:outline-[#E85D3F] ${
-                    active
-                      ? 'bg-[#23232A] text-[#F4F4F6]'
-                      : 'text-[#8C8C96] hover:text-[#F4F4F6]'
-                  }`}
-                >
-                  {genre}
-                </button>
-              );
-            })}
-          </div>
-        )}
+        {/* Search Input */}
+        <div className="relative w-full sm:flex-1 sm:max-w-lg order-3 sm:order-2">
+          <label htmlFor="catalog-search" className="sr-only">
+            Search tracks, albums, artists, or folders
+          </label>
+          <Search
+            className="w-4 h-4 text-zinc-400 dark:text-[#6E6E78] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
+            strokeWidth={1.75}
+          />
+          <input
+            id="catalog-search"
+            type="search"
+            value={searchQuery}
+            onChange={(e) => onSearchChange(e.target.value)}
+            placeholder="Search tracks, artists, albums, folders..."
+            className="w-full h-10 pl-10 pr-9 bg-white dark:bg-[#151519] border border-zinc-200 dark:border-white/[0.08] rounded-lg text-sm text-zinc-900 dark:text-[#F4F4F6] placeholder-zinc-400 dark:placeholder-[#6E6E78] focus:outline-none focus:border-[#E85D3F] transition-colors"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => onSearchChange('')}
+              aria-label="Clear search"
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-zinc-500 dark:text-[#7C7C87] hover:text-zinc-900 dark:hover:text-[#F4F4F6] rounded"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
       </div>
     </header>
   );
